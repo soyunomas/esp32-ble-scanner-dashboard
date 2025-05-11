@@ -74,12 +74,26 @@ Este proyecto implementa un sistema de escaneo de dispositivos Bluetooth Low Ene
 
 ## 🚀 Configuración y Despliegue
 
+### 0. Clonar el Repositorio
+
+Para obtener el código del proyecto, clona este repositorio desde GitHub:
+
+```bash
+git clone https://github.com/soyunomas/esp32-ble-scanner-dashboard.git
+cd esp32-ble-scanner-dashboard
+```
+
 ### 1. Backend (Servidor Flask) 🐍
 
 #### Prerrequisitos
 
 *   Python 3.7 o superior.
 *   `pip` (gestor de paquetes de Python).
+*   **SQLite3 y sus herramientas de desarrollo (en Ubuntu/Debian):**
+    ```bash
+    sudo apt update
+    sudo apt install sqlite3 libsqlite3-dev
+    ```
 
 #### 💻 Instalación de Dependencias
 
@@ -87,21 +101,17 @@ Se recomienda crear y activar un entorno virtual:
 
 ```bash
 python -m venv venv
+# En macOS/Linux:
+source venv/bin/activate
 # En Windows:
 # venv\Scripts\activate
-# En macOS/Linux:
-# source venv/bin/activate
+
 ```
 
 Luego, instala las dependencias desde el archivo `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
-```
-
-Si el archivo `requirements.txt` no está disponible, puedes instalar las librerías manualmente:
-```bash
-pip install Flask pyyaml pytz
 ```
 
 #### ▶️ Ejecución del Servidor
@@ -138,6 +148,34 @@ company_identifiers:
   # ... más identificadores
 ```
 El script `ble_utils.py` cargará estos identificadores al inicio.
+Vale, aquí tienes una sección más concisa para el `README.md` sobre cómo cambiar la zona horaria:
+
+## Ajuste de Zona Horaria
+
+La aplicación muestra los timestamps convertidos a una zona horaria específica definida en el backend. Por defecto, está configurada para `Atlantic/Canary`.
+
+Para cambiar la zona horaria de visualización:
+
+1.  **Abrir `backend_server.py`**.
+2.  **Modificar `TARGET_TIMEZONE_PYTZ`**:
+    Busca la línea:
+    ```python
+    TARGET_TIMEZONE_PYTZ = pytz.timezone('Atlantic/Canary')
+    ```
+    Reemplaza `'Atlantic/Canary'` por el [nombre de zona horaria IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) deseado (e.g., `'Europe/Madrid'`, `'America/New_York'`).
+
+3.  **Ajustar `SQLITE_ANALYTICS_TIME_OFFSET`**:
+    Esta variable (e.g., `'+1 hours'`) ayuda a SQLite a realizar agregaciones basadas en la hora local aproximada. Ajústala según el offset UTC típico de tu nueva zona horaria. Por ejemplo, para `Europe/Madrid` (UTC+1 o UTC+2 con DST), podrías usar `'+1 hours'` o `'+2 hours'` dependiendo de la mayor parte del año o la precisión requerida.
+    ```python
+    SQLITE_ANALYTICS_TIME_OFFSET = '+2 hours' # Ejemplo para Madrid (CEST)
+    ```
+    *Nota: La conversión exacta con manejo de DST se realiza en Python antes de mostrar timestamps individuales. Este offset es para agregaciones en la base de datos.*
+
+4.  **Reiniciar el Servidor Backend**:
+    Guarda los cambios en `backend_server.py` y reinicia el servidor Flask para aplicar la nueva configuración.
+    ```bash
+    python backend_server.py
+    ```
 
 ### 2. ESP32-C3 (Nodo de Escaneo) 📡
 
