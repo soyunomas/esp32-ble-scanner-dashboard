@@ -124,6 +124,21 @@ python backend_server.py
 
 El servidor backend se iniciará por defecto en `http://0.0.0.0:5000`. La base de datos (`ble_data.db` por defecto) y el archivo de log (`backend_server.log` por defecto) se crearán automáticamente en este directorio.
 
+
+⚠️ **ADVERTENCIA: MODO DEPURACIÓN** ⚠️
+
+## **EL PROYECTO ESTÁ EN DESARROLLO Y TIENE EL DEPURADOR DE FLASK ACTIVO.**
+
+Esto es útil para depurar, pero **NO USAR EN PRODUCCIÓN** (riesgo de seguridad).
+
+Verás: `* Debugger is active! * Debugger PIN: XXX-XXX-XXX`
+
+**Para desactivar antes de producción:**
+
+1.  En `backend_server.py`, busca la línea `app.run(...)`.
+2.  Cambia `debug=True` a `debug=False`.
+3.  Reinicia el servidor.
+
 ## Acceso al Dashboard Web
 
 Una vez que el [Servidor Backend](#1-backend-servidor-flask) esté configurado y en ejecución, puedes acceder al Dashboard Web a través de tu navegador.
