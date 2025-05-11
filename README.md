@@ -45,22 +45,6 @@ Este proyecto implementa un sistema de escaneo de dispositivos Bluetooth Low Ene
     *   Realiza peticiones AJAX a los endpoints de la API del backend.
     *   Renderiza tablas y gráficos (usando Chart.js) para visualizar la información.
 
-## 📁 Estructura del Repositorio
-
-```
-ble-scanner-dashboard/
-├── .gitignore
-├── backend_server.py
-├── ble_utils.py
-├── company_identifiers.yaml
-├── requirements.txt
-├── esp32_ble_scanner/
-│   └── esp32_ble_scanner.ino
-├── templates/
-│   └── dashboard.html
-└── README.md
-```
-
 ## 🚀 Configuración y Despliegue
 
 ### 1. Backend (Servidor Flask) 🐍
