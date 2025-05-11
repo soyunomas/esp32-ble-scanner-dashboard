@@ -124,6 +124,17 @@ python backend_server.py
 
 El servidor backend se iniciará por defecto en `http://0.0.0.0:5000`. La base de datos (`ble_data.db` por defecto) y el archivo de log (`backend_server.log` por defecto) se crearán automáticamente en este directorio.
 
+## Acceso al Dashboard Web
+
+Una vez que el [Servidor Backend](#1-backend-servidor-flask) esté configurado y en ejecución, puedes acceder al Dashboard Web a través de tu navegador.
+
+La URL para acceder al dashboard es:
+
+*   **Si el backend corre en tu máquina local:** `http://localhost:5000/dashboard`
+*   **Si el backend corre en otra máquina en tu red:** `http://<IP_DEL_SERVIDOR_BACKEND>:5000/dashboard`
+    *(Reemplaza `<IP_DEL_SERVIDOR_BACKEND>` con la dirección IP de la máquina donde se está ejecutando el `backend_server.py`)*.
+
+
 #### ⚙️ Configuración del Backend
 
 Dentro de `backend_server.py`, puedes ajustar las siguientes constantes globales:
