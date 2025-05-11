@@ -125,19 +125,21 @@ python backend_server.py
 El servidor backend se iniciará por defecto en `http://0.0.0.0:5000`. La base de datos (`ble_data.db` por defecto) y el archivo de log (`backend_server.log` por defecto) se crearán automáticamente en este directorio.
 
 
-⚠️ **ADVERTENCIA: MODO DEPURACIÓN** ⚠️
+⚠️ **ADVERTENCIA: MODO DEPURACIÓN Y SERVIDOR DE DESARROLLO** ⚠️
 
-## **EL PROYECTO ESTÁ EN DESARROLLO Y TIENE EL DEPURADOR DE FLASK ACTIVO.**
+## **EL PROYECTO ESTÁ EN DESARROLLO Y USA EL SERVIDOR DE DESARROLLO DE FLASK.**
 
-Esto es útil para depurar, pero **NO USAR EN PRODUCCIÓN** (riesgo de seguridad).
+*   **Modo Depuración (`debug=True`):** Útil para encontrar errores. Verás `* Debugger is active!`. **NO USAR EN PRODUCCIÓN.**
+*   **Modo Producción (`debug=False`):** Más seguro, pero el servidor de desarrollo de Flask **SIGUE SIN SER APTO PARA PRODUCCIÓN**. Verás `WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.`
 
-Verás: `* Debugger is active! * Debugger PIN: XXX-XXX-XXX`
-
-**Para desactivar antes de producción:**
+**Para desactivar el modo de depuración:**
 
 1.  En `backend_server.py`, busca la línea `app.run(...)`.
 2.  Cambia `debug=True` a `debug=False`.
 3.  Reinicia el servidor.
+
+**Para despliegue a producción:**
+Deberás utilizar un servidor WSGI de producción (como Gunicorn, uWSGI o Waitress) en lugar de `app.run()`. Esto está fuera del alcance de esta guía de configuración básica.
 
 ## Acceso al Dashboard Web
 
