@@ -44,6 +44,33 @@ Este proyecto implementa un sistema de escaneo de dispositivos Bluetooth Low Ene
     *   Se sirve desde el endpoint `/dashboard` del servidor Flask.
     *   Realiza peticiones AJAX a los endpoints de la API del backend.
     *   Renderiza tablas y gráficos (usando Chart.js) para visualizar la información.
+## Capturas de Pantalla
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" valign="top">
+        <p>Vista Principal - Dispositivos Únicos</p>
+        <img src="./images/screenshot1.png" alt="Vista Principal - Dispositivos Únicos" width="400">
+      </td>
+      <td align="center" valign="top">
+        <p>Estadísticas Generales</p>
+        <img src="./images/screenshot2.png" alt="Estadísticas Generales" width="400">
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <p>Actividad diaria</p>
+        <img src="./images/screenshot3.png" alt="Actividad diaria" width="400">
+      </td>
+      <td align="center" valign="top">
+        <p>Análisis Avanzado - Tendencia RSSI</p>
+        <img src="./images/screenshot4.png" alt="Análisis Avanzado - Tendencia RSSI" width="400">
+      </td>
+    </tr>
+  </table>
+</div>
+
 
 ## 🚀 Configuración y Despliegue
 
