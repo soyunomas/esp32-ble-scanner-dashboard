@@ -1,0 +1,519 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Preferences.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h> // Asegúrate de tener la v6.x o superior
+
+#include <BLEDevice.h>   // Esto debería incluir BLEUtils.h, BLEScan.h, BLEAdvertisedDevice.h etc.
+// Si tu versión funcional incluía explícitamente más cabeceras BLE, las mantenemos:
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+
+
+// --- Definición del Pin del Botón de Reset de Configuración ---
+#define RESET_CONFIG_BUTTON_PIN GPIO_NUM_9
+#define RESET_CONFIG_HOLD_TIME_MS 5000
+
+// --- WiFi Credentials Storage ---
+Preferences preferences;
+
+// --- Web Server (para configuración) ---
+WebServer server(80);
+const char *AP_SSID = "ESP32-Device-Config";
+
+// --- Servidor de Datos BLE ---
+String server_ip = "192.168.1.100";
+int server_port = 5000;
+String server_endpoint_path = "/api/ble-data";
+
+// --- Variables de estado y configuración ---
+bool wifiConfigured = false;
+String stored_ssid = "";
+String stored_password = "";
+String device_id = "ESP32_Default_ID";
+
+// --- BLE Variables ---
+int scanTime = 5;
+unsigned long ble_config_scan_interval_sec = 10;
+BLEScan *pBLEScan;
+
+
+// --- Claves para Preferences ---
+const char* PREF_KEY_WIFI_SSID = "wifi_ssid";
+const char* PREF_KEY_WIFI_PASS = "wifi_pass";
+const char* PREF_KEY_SRV_IP = "srv_ip";
+const char* PREF_KEY_SRV_PORT = "srv_port";
+const char* PREF_KEY_BLE_INTERVAL = "ble_scan_int";
+const char* PREF_KEY_BLE_DURATION = "ble_scan_dur";
+const char* PREF_KEY_DEVICE_ID = "device_id";
+
+
+// Helper para convertir std::string (bytes) a String (hexadecimal)
+String bytesToHexString(const std::string &input) {
+  String output = "";
+  output.reserve(input.length() * 2 + 1);
+  for (size_t i = 0; i < input.length(); i++) {
+    char buf[3];
+    sprintf(buf, "%02X", (unsigned char)input[i]);
+    output += buf;
+  }
+  return output;
+}
+
+// Helper para convertir Arduino String (potencialmente con bytes) a String (hexadecimal)
+String bytesToHexString(const String &input) {
+  String output = "";
+  output.reserve(input.length() * 2 + 1);
+  for (size_t i = 0; i < input.length(); i++) {
+    char buf[3];
+    sprintf(buf, "%02X", (unsigned char)input.charAt(i));
+    output += buf;
+  }
+  return output;
+}
+
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    // No se usa activamente aquí
+  }
+};
+
+const char CONFIG_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html><head>
+<title>Configuracion ESP32</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+  h2 { color: #007bff; } h3 { margin-top:30px; color: #0056b3;}
+  form { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom:20px; }
+  label { display: block; margin-bottom: 8px; font-weight: bold; }
+  input[type="text"], input[type="password"], input[type="number"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+  input[type="submit"], button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top:10px;}
+  input[type="submit"]:hover, button:hover { background-color: #0056b3; }
+  .msg { margin-top:15px; padding:10px; border-radius:4px; }
+  .success { background-color:#d4edda; color:#155724; border:1px solid #c3e6cb; }
+  .error { background-color:#f8d7da; color:#721c24; border:1px solid #f5c6cb; }
+  #wifi-networks-list { margin-top: 10px; padding: 10px; background-color: #e9ecef; border-radius: 4px; max-height: 200px; overflow-y: auto; }
+  #wifi-networks-list div { padding: 5px; cursor: pointer; border-bottom: 1px solid #ddd; }
+  #wifi-networks-list div:last-child { border-bottom: none; }
+  #wifi-networks-list div:hover { background-color: #007bff; color: white; }
+  .wifi-scan-status { font-style: italic; margin-bottom: 5px; }
+</style>
+<script>
+function scanWifiNetworks() {
+  var listElement = document.getElementById('wifi-networks-list');
+  listElement.innerHTML = "<div class='wifi-scan-status'>Escaneando...</div>";
+  fetch('/scanwifi')
+    .then(response => response.text())
+    .then(data => {
+      listElement.innerHTML = data;
+      var networks = listElement.getElementsByTagName('div');
+      for (var i = 0; i < networks.length; i++) {
+        if(networks[i].getAttribute('data-ssid')) {
+            networks[i].addEventListener('click', function() {
+                document.getElementById('ssid').value = this.getAttribute('data-ssid');
+            });
+        }
+      }
+    })
+    .catch(error => {
+      console.error('Error escaneando WiFi:', error);
+      listElement.innerHTML = "<div class='wifi-scan-status error'>Error al escanear.</div>";
+    });
+}
+</script>
+</head><body>
+<h2>Configurar Dispositivo ESP32</h2>
+<p>Para borrar la configuracion actual: manten presionado el boton BOOT/GPIO9 (o el configurado como RESET_CONFIG_BUTTON_PIN) durante el encendido/reinicio del ESP32 por %RESET_TIME% segundos.</p>
+<h3>Identificador del Dispositivo</h3>
+<form method='POST' action='/savedeviceid'>
+  <label for='device_id'>Identificador del Dispositivo:</label>
+  <input type='text' name='device_id' id='device_id' value='%DEVICE_ID%' maxlength="32" required><br>
+  <input type='submit' value='Guardar ID Dispositivo y Reiniciar'>
+</form>
+<h3>Configuracion WiFi</h3>
+<form method='POST' action='/savewifi'>
+  <button type="button" onclick="scanWifiNetworks()">Escanear Redes WiFi</button>
+  <div id="wifi-networks-list">Haz clic en "Escanear Redes WiFi" para ver las redes disponibles.</div><br>
+  <label for='ssid'> SSID (Nombre de Red):</label>
+  <input type='text' name='ssid' id='ssid' value='%WIFI_SSID%' required><br>
+  <label for='pass'>Contrasena WiFi:</label>
+  <input type='password' name='pass' id='pass' placeholder="Dejar en blanco para no cambiar"><br>
+  <input type='submit' value='Guardar WiFi y Reiniciar'>
+</form>
+<h3>Configuracion Servidor de Datos</h3>
+<form method='POST' action='/saveserver'>
+  <label for='server_ip'>IP del Servidor:</label>
+  <input type='text' name='server_ip' id='server_ip' value='%SERVER_IP%' required><br>
+  <label for='server_port'>Puerto del Servidor:</label>
+  <input type='number' name='server_port' id='server_port' value='%SERVER_PORT%' min="1" max="65535" required><br>
+  <input type='submit' value='Guardar Servidor y Reiniciar'>
+</form>
+<h3>Configuracion Escaneo BLE</h3>
+<form method='POST' action='/savebleconfig'>
+  <label for='ble_scan_interval'>Intervalo entre ciclos de escaneo/envio (segundos):</label>
+  <input type='number' name='ble_scan_interval' id='ble_scan_interval' value='%BLE_SCAN_INTERVAL%' min="1" max="3600" required><br>
+  <label for='ble_scan_duration'>Duracion de cada escaneo BLE (segundos):</label>
+  <input type='number' name='ble_scan_duration' id='ble_scan_duration' value='%BLE_SCAN_DURATION%' min="1" max="60" required><br>
+  <input type='submit' value='Guardar Configuracion BLE y Reiniciar'>
+</form>
+%MESSAGE%
+</body></html>
+)rawliteral";
+
+String populateHtml(const String &message = "") {
+  String html_content = String(CONFIG_HTML);
+  html_content.replace("%DEVICE_ID%", device_id);
+  html_content.replace("%WIFI_SSID%", stored_ssid);
+  html_content.replace("%SERVER_IP%", server_ip);
+  html_content.replace("%SERVER_PORT%", String(server_port));
+  html_content.replace("%BLE_SCAN_INTERVAL%", String(ble_config_scan_interval_sec));
+  html_content.replace("%BLE_SCAN_DURATION%", String(scanTime));
+  html_content.replace("%MESSAGE%", message);
+  html_content.replace("%RESET_TIME%", String(RESET_CONFIG_HOLD_TIME_MS / 1000));
+  return html_content;
+}
+
+void handleRoot() { server.send(200, "text/html", populateHtml()); }
+
+void handleSaveDeviceId() {
+  Serial.println("Guardando Device ID...");
+  String new_device_id = server.arg("device_id");
+  String msg;
+  if (new_device_id.length() > 0 && new_device_id.length() <= 32) {
+    preferences.begin("config", false);
+    preferences.putString(PREF_KEY_DEVICE_ID, new_device_id);
+    preferences.end();
+    device_id = new_device_id;
+    msg = "<div class='msg success'>Identificador del Dispositivo guardado. Reiniciando...</div>";
+    server.send(200, "text/html", populateHtml(msg));
+    delay(2000); ESP.restart();
+  } else {
+    msg = (new_device_id.length() == 0) ? "<div class='msg error'>Error: El Identificador del Dispositivo no puede estar vacio.</div>"
+                                       : "<div class='msg error'>Error: El Identificador del Dispositivo no puede exceder los 32 caracteres.</div>";
+    server.send(200, "text/html", populateHtml(msg));
+  }
+}
+
+void handleSaveWifi() {
+  Serial.println("Guardando config WiFi...");
+  String new_ssid = server.arg("ssid");
+  String new_pass = server.arg("pass");
+  String msg;
+  if (new_ssid.length() > 0) {
+    preferences.begin("config", false);
+    preferences.putString(PREF_KEY_WIFI_SSID, new_ssid);
+    if (new_pass.length() > 0 || stored_ssid != new_ssid) {
+      preferences.putString(PREF_KEY_WIFI_PASS, new_pass);
+      stored_password = new_pass;
+    }
+    preferences.end();
+    stored_ssid = new_ssid;
+    msg = "<div class='msg success'>Configuracion WiFi guardada. Reiniciando...</div>";
+    server.send(200, "text/html", populateHtml(msg));
+    delay(2000); ESP.restart();
+  } else {
+    msg = "<div class='msg error'>Error: SSID WiFi no puede estar vacio.</div>";
+    server.send(200, "text/html", populateHtml(msg));
+  }
+}
+
+void handleSaveServer() {
+  Serial.println("Guardando config Servidor...");
+  String new_server_ip = server.arg("server_ip");
+  int new_server_port = server.arg("server_port").toInt();
+  String msg;
+  if (new_server_ip.length() > 0 && new_server_port > 0 && new_server_port <= 65535) {
+    preferences.begin("config", false);
+    preferences.putString(PREF_KEY_SRV_IP, new_server_ip);
+    preferences.putInt(PREF_KEY_SRV_PORT, new_server_port);
+    preferences.end();
+    server_ip = new_server_ip; server_port = new_server_port;
+    msg = "<div class='msg success'>Configuracion Servidor guardada. Reiniciando...</div>";
+    server.send(200, "text/html", populateHtml(msg));
+    delay(2000); ESP.restart();
+  } else {
+    msg = "<div class='msg error'>Error: IP o Puerto del servidor invalidos.</div>";
+    server.send(200, "text/html", populateHtml(msg));
+  }
+}
+
+void handleSaveBleConfig() {
+  Serial.println("Guardando config BLE...");
+  int new_ble_interval_sec = server.arg("ble_scan_interval").toInt();
+  int new_ble_duration_sec = server.arg("ble_scan_duration").toInt();
+  String msg;
+  bool interval_valid = (new_ble_interval_sec >= 1 && new_ble_interval_sec <= 3600);
+  bool duration_valid = (new_ble_duration_sec >= 1 && new_ble_duration_sec <= 60);
+  if (interval_valid && duration_valid) {
+    preferences.begin("config", false);
+    preferences.putUInt(PREF_KEY_BLE_INTERVAL, new_ble_interval_sec);
+    preferences.putInt(PREF_KEY_BLE_DURATION, new_ble_duration_sec);
+    preferences.end();
+    ble_config_scan_interval_sec = new_ble_interval_sec; scanTime = new_ble_duration_sec;
+    msg = "<div class='msg success'>Configuracion BLE guardada. Reiniciando...</div>";
+    server.send(200, "text/html", populateHtml(msg));
+    delay(2000); ESP.restart();
+  } else {
+    String error_details = "";
+    if (!interval_valid) error_details += "Intervalo de escaneo BLE invalido (1-3600s). ";
+    if (!duration_valid) error_details += "Duracion de escaneo BLE invalida (1-60s).";
+    msg = "<div class='msg error'>Error: " + error_details + "</div>";
+    server.send(200, "text/html", populateHtml(msg));
+  }
+}
+
+String getEncryptionTypeString(wifi_auth_mode_t encryptionType) {
+  switch (encryptionType) {
+    case WIFI_AUTH_OPEN: return "Open"; case WIFI_AUTH_WEP: return "WEP";
+    case WIFI_AUTH_WPA_PSK: return "WPA_PSK"; case WIFI_AUTH_WPA2_PSK: return "WPA2_PSK";
+    case WIFI_AUTH_WPA_WPA2_PSK: return "WPA_WPA2_PSK"; case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2_ENTERPRISE";
+    case WIFI_AUTH_WPA3_PSK: return "WPA3_PSK"; case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2_WPA3_PSK";
+    default: return "Unknown";
+  }
+}
+
+void handleScanWifi() {
+  Serial.println("Solicitud de escaneo WiFi recibida.");
+  String htmlResponse = ""; int n = WiFi.scanNetworks();
+  Serial.printf("Escaneo completado. %d redes encontradas.\n", n);
+  if (n == 0) { htmlResponse = "<div class='wifi-scan-status'>No se encontraron redes.</div>"; }
+  else {
+    for (int i = 0; i < n; ++i) {
+      String ssidName = WiFi.SSID(i); ssidName.replace("<", "<"); ssidName.replace(">", ">");
+      htmlResponse += "<div data-ssid=\"" + ssidName + "\"><b>" + ssidName + "</b> (RSSI: " + String(WiFi.RSSI(i)) + " dBm, Enc: " + getEncryptionTypeString(WiFi.encryptionType(i)) + ")</div>";
+    }
+  }
+  server.send(200, "text/html", htmlResponse);
+}
+
+bool connectToWiFi() {
+  if (stored_ssid.length() == 0) { Serial.println("connectToWiFi(): No SSID."); return false; }
+  WiFi.mode(WIFI_STA); WiFi.begin(stored_ssid.c_str(), stored_password.c_str());
+  Serial.print("Conectando a WiFi: " + stored_ssid);
+  for (int attempt = 0; WiFi.status() != WL_CONNECTED && attempt < 20; attempt++) { delay(500); Serial.print("."); }
+  Serial.println();
+  if (WiFi.status() == WL_CONNECTED) { Serial.println("WiFi conectado. IP: " + WiFi.localIP().toString()); return true; }
+  else { Serial.println("Fallo conexion WiFi."); WiFi.disconnect(); return false; }
+}
+
+void startAPMode() {
+  Serial.println("Iniciando Modo AP...");
+  WiFi.persistent(false); WiFi.disconnect(true, true); delay(100);
+  WiFi.mode(WIFI_AP); WiFi.softAP(AP_SSID);
+  IPAddress IP = WiFi.softAPIP(); Serial.println("AP IP: " + IP.toString());
+  server.on("/", HTTP_GET, handleRoot); server.on("/savedeviceid", HTTP_POST, handleSaveDeviceId);
+  server.on("/savewifi", HTTP_POST, handleSaveWifi); server.on("/saveserver", HTTP_POST, handleSaveServer);
+  server.on("/savebleconfig", HTTP_POST, handleSaveBleConfig); server.on("/scanwifi", HTTP_GET, handleScanWifi);
+  server.begin(); Serial.println("Servidor Web en AP iniciado. Conectate a '" + String(AP_SSID) + "' en http://" + IP.toString());
+}
+
+void sendBleDataToServer(BLEScanResults &foundDevices) { // Acepta referencia
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi no conectado."); return;
+  }
+  if (foundDevices.getCount() == 0 && (device_id == "ESP32_Default_ID" || device_id.isEmpty())) {
+    Serial.println("No hay dispositivos BLE nuevos para reportar y el Device ID es el por defecto/vacio."); return;
+  }
+
+  HTTPClient http;
+  String serverUrl = "http://" + server_ip + ":" + String(server_port) + server_endpoint_path;
+
+  size_t jsonCapacityPerDevice = 768;
+  size_t baseJsonSize = JSON_OBJECT_SIZE(2);
+  size_t arrayOverhead = JSON_ARRAY_SIZE(foundDevices.getCount());
+  size_t devicesDataSize = foundDevices.getCount() * (JSON_OBJECT_SIZE(9) + jsonCapacityPerDevice);
+  
+  size_t jsonCapacity = baseJsonSize + arrayOverhead + devicesDataSize;
+  DynamicJsonDocument jsonDoc(jsonCapacity);
+
+  jsonDoc["deviceId"] = device_id;
+  JsonArray devicesArray = jsonDoc.createNestedArray("devices");
+
+  if (foundDevices.getCount() > 0) {
+    for (int i = 0; i < foundDevices.getCount(); i++) {
+      BLEAdvertisedDevice device = foundDevices.getDevice(i);
+      JsonObject deviceObj = devicesArray.createNestedObject();
+
+      deviceObj["macAddress"] = device.getAddress().toString().c_str();
+      if (device.haveName()) deviceObj["deviceName"] = device.getName().c_str();
+      if (device.haveRSSI()) deviceObj["rssi"] = device.getRSSI();
+      if (device.haveManufacturerData()) {
+        deviceObj["manufacturerData"] = bytesToHexString(device.getManufacturerData());
+      }
+
+      if (device.haveServiceData() && device.getServiceDataCount() > 0) {
+          JsonObject serviceDataObject = deviceObj.createNestedObject("serviceData");
+          for (int j = 0; j < device.getServiceDataCount(); j++) {
+              BLEUUID serviceDataUUID = device.getServiceDataUUID(j);
+              String serviceDataValueArduinoStr = device.getServiceData(j);
+              serviceDataObject[serviceDataUUID.toString().c_str()] = bytesToHexString(serviceDataValueArduinoStr);
+          }
+      }
+
+      if (device.haveServiceUUID()) {
+        JsonArray serviceUUIDsArray = deviceObj.createNestedArray("serviceUUIDs");
+        for (int j = 0; j < device.getServiceUUIDCount(); j++) {
+          serviceUUIDsArray.add(device.getServiceUUID(j).toString().c_str());
+        }
+      }
+
+      if (device.haveTXPower()) deviceObj["txPower"] = device.getTXPower();
+      if (device.haveAppearance()) deviceObj["appearance"] = device.getAppearance();
+    }
+  }
+
+  String jsonPayload;
+  serializeJson(jsonDoc, jsonPayload);
+
+  if (jsonPayload.length() == 0 && jsonDoc.overflowed()) {
+    Serial.printf("ERROR: JSON overflowed! Capacidad: %u, Necesario: %u. Aumentar jsonCapacity.\n", jsonCapacity, jsonDoc.memoryUsage());
+    return;
+  }
+  if (jsonDoc.overflowed()){
+    Serial.printf("ADVERTENCIA: JSON overflowed parcialmente. Capacidad: %u, Usado: %u.\n", jsonCapacity, jsonDoc.memoryUsage());
+  }
+  // Descomentar para depurar payload
+  // Serial.println("Enviando payload:");
+  // if (jsonPayload.length() > 300) { Serial.print(jsonPayload.substring(0, 300)); Serial.println("... (payload largo)"); } 
+  // else { Serial.println(jsonPayload); }
+
+
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/json");
+  int httpResponseCode = http.POST(jsonPayload);
+
+  if (httpResponseCode > 0) {
+    // Serial.printf("HTTP Response: %d\n", httpResponseCode);
+  } else {
+    Serial.printf("HTTP POST failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
+  }
+  http.end();
+}
+
+void checkForConfigReset() {
+  pinMode(RESET_CONFIG_BUTTON_PIN, INPUT_PULLUP);
+  Serial.println("checkForConfigReset(): Chequeando boton...");
+  delay(200);
+  if (digitalRead(RESET_CONFIG_BUTTON_PIN) == LOW) {
+    Serial.println("checkForConfigReset(): Boton presionado. Mantener para reset.");
+    unsigned long pressStartTime = millis(); int countdown = RESET_CONFIG_HOLD_TIME_MS / 1000;
+    while (digitalRead(RESET_CONFIG_BUTTON_PIN) == LOW) {
+      if ((millis() - pressStartTime) >= RESET_CONFIG_HOLD_TIME_MS) {
+        Serial.println("\ncheckForConfigReset(): BORRANDO CONFIG...");
+        preferences.begin("config", false); preferences.clear(); preferences.end();
+        Serial.println("checkForConfigReset(): Config borrada. Reiniciando...");
+        delay(1000); ESP.restart(); return;
+      }
+      if ((RESET_CONFIG_HOLD_TIME_MS - (millis() - pressStartTime)) / 1000 < countdown) {
+        countdown = (RESET_CONFIG_HOLD_TIME_MS - (millis() - pressStartTime)) / 1000;
+        Serial.printf("checkForConfigReset(): ... %d ...\n", countdown + 1);
+      }
+      delay(50);
+    }
+    Serial.println("\ncheckForConfigReset(): Boton liberado. Reset cancelado.");
+  } else { Serial.println("checkForConfigReset(): Boton no presionado."); }
+}
+
+void setup() {
+  Serial.begin(115200);
+  unsigned long setupStartTime = millis();
+  while (!Serial && (millis() - setupStartTime < 2000));
+  Serial.println("\n\nESP32 BLE to Server - Enhanced Data v2 (Restored BLE Logic)");
+
+  checkForConfigReset();
+
+  preferences.begin("config", true);
+  device_id = preferences.getString(PREF_KEY_DEVICE_ID, device_id);
+  stored_ssid = preferences.getString(PREF_KEY_WIFI_SSID, "");
+  stored_password = preferences.getString(PREF_KEY_WIFI_PASS, "");
+  server_ip = preferences.getString(PREF_KEY_SRV_IP, server_ip);
+  server_port = preferences.getInt(PREF_KEY_SRV_PORT, server_port);
+  ble_config_scan_interval_sec = preferences.getUInt(PREF_KEY_BLE_INTERVAL, ble_config_scan_interval_sec);
+  scanTime = preferences.getInt(PREF_KEY_BLE_DURATION, scanTime);
+  preferences.end();
+
+  Serial.println("--- Config Cargada ---");
+  Serial.printf("Device ID: '%s', WiFi SSID: '%s'\n", device_id.c_str(), stored_ssid.c_str());
+  Serial.printf("Server: %s:%d, BLE Int: %lu s, BLE Dur: %d s\n", server_ip.c_str(), server_port, ble_config_scan_interval_sec, scanTime);
+  Serial.println("----------------------");
+
+  if (stored_ssid.length() > 0) {
+    if (connectToWiFi()) wifiConfigured = true;
+    else { wifiConfigured = false; startAPMode(); }
+  } else {
+    Serial.println("SSID no config. Iniciando AP.");
+    wifiConfigured = false; startAPMode();
+  }
+
+  if (wifiConfigured) {
+    Serial.println("Inicializando BLE...");
+    BLEDevice::init(""); // <--- CAMBIO: Usar "" como en tu versión funcional
+    pBLEScan = BLEDevice::getScan();
+    if (pBLEScan) {
+      pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks()); // <--- CAMBIO: Sin segundo parámetro 'true'
+      pBLEScan->setActiveScan(true);
+      pBLEScan->setInterval(100);
+      pBLEScan->setWindow(99);
+      Serial.println("BLE Inicializado.");
+    } else { Serial.println("ERROR: Fallo al inicializar pBLEScan."); }
+  } else { Serial.println("Modo AP. BLE no iniciado."); }
+}
+
+void loop() {
+  if (!wifiConfigured || WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+    server.handleClient();
+  }
+
+  if (wifiConfigured && WiFi.status() == WL_CONNECTED) {
+    if (pBLEScan) {
+        Serial.printf("Iniciando escaneo BLE (Dur: %d s)...\n", scanTime);
+        // No llamar a pBLEScan->clearResults(); aquí, siguiendo tu versión funcional
+
+        BLEScanResults* pFoundDevices = pBLEScan->start(scanTime, false);
+
+        if (pFoundDevices) {
+          Serial.printf("Escaneo BLE finalizado. Dispositivos: %d\n", pFoundDevices->getCount());
+          sendBleDataToServer(*pFoundDevices);
+          pBLEScan->clearResults(); // <--- CAMBIO: Limpiar resultados DESPUÉS de procesar y DENTRO del if
+        } else {
+          Serial.println("Error en escaneo BLE (start() devolvio null o no se completo).");
+        }
+        
+        unsigned long intervalMs = ble_config_scan_interval_sec * 1000;
+        // Tu versión funcional tiene una lógica más compleja para el delay, la replicamos:
+        unsigned long scanTimeMs = (unsigned long)scanTime * 1000;
+        unsigned long delayTimeMs;
+        if (intervalMs > scanTimeMs) {
+            delayTimeMs = intervalMs - scanTimeMs;
+        } else {
+            delayTimeMs = 100; // Un pequeño delay si el escaneo es más largo que el intervalo
+        }
+        //Serial.printf("Esperando %lu ms para proximo ciclo BLE...\n", delayTimeMs);
+        delay(delayTimeMs);
+
+    } else {
+        Serial.println("BLE no inicializado. Reintentando init en 5s...");
+        delay(5000);
+        BLEDevice::init(""); // <--- CAMBIO: Usar ""
+        pBLEScan = BLEDevice::getScan();
+        if (pBLEScan) {
+            pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks()); // <--- CAMBIO: Sin 'true'
+            pBLEScan->setActiveScan(true); pBLEScan->setInterval(100); pBLEScan->setWindow(99);
+            Serial.println("BLE Re-Inicializado en loop.");
+        } else { Serial.println("Fallo al Re-Inicializar BLE en loop."); delay(10000); }
+    }
+  } else if (!wifiConfigured) {
+    delay(10);
+  } else if (WiFi.status() != WL_CONNECTED) {
+     Serial.println("WiFi perdido! Reconectando...");
+     if (!connectToWiFi()) {
+       Serial.println("Reconexion fallida. Reiniciando AP...");
+       wifiConfigured = false;
+       startAPMode();
+     }
+  } else {
+    delay(1000);
+  }
+}
