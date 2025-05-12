@@ -269,6 +269,24 @@ Una vez cargado el firmware, el ESP32 intentará conectarse a la WiFi previament
         *   **Duración de cada escaneo BLE (segundos):** Cuánto tiempo el ESP32 escaneará activamente dispositivos BLE en cada ciclo.
 5.  **Guardar y Reiniciar:** Cada sección ("Identificador", "WiFi", "Servidor", "BLE") tiene su propio botón de guardar. Al hacer clic en "Guardar ... y Reiniciar", el ESP32 almacenará la configuración correspondiente y se reiniciará para aplicar los cambios.
 
+## Capturas de Pantalla
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" valign="top">
+        <p>Configuración Id_dispositivo y Wifi</p>
+        <img src="./images/esp32-1.png" alt="Configuración Id_dispositivo y Wifi" width="400">
+      </td>
+      <td align="center" valign="top">
+        <p>Configuración Servidor y tiempos escaneo</p>
+        <img src="./images/esp32-2.png" alt="Configuración Servidor y tiempos escaneo" width="400">
+      </td>
+    </tr>
+  </table>
+</div>
+
+
 #### 🔄 Reset de Configuración del ESP32
 
 Para borrar toda la configuración almacenada en el ESP32 (WiFi, servidor, ID, etc.) y forzarlo a volver al Modo AP para una nueva configuración:
